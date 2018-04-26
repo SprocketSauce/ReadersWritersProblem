@@ -4,6 +4,7 @@ typedef struct
 	int length;
 	int start;
 	int end;
+	int num;
 } CircularBuffer;
 
 CircularBuffer* createBuffer( int );

@@ -104,6 +104,7 @@ void* writer( void* voidIn )
 
 	while ( eof != EOF )
 	{
+		/* Waits for writer critical section to be free */
 		pthread_mutex_lock( &wmutex );
 		if ( reading >= 1 || writing == 1 )
 		{
@@ -153,7 +154,7 @@ void* writer( void* voidIn )
 
 void* reader( void* voidIn )
 {
-	int value, pid, count, index; 
+	int value, pid, count, index, success;
 	ReaderInput* in;
 	
 	pid = pthread_self();
@@ -187,6 +188,7 @@ void* reader( void* voidIn )
 
 		/* Reads from the current cell of the data buffer, provided it has already been
 		 * written to and has not already been read */
+		success = 0;		
 		if ( in -> buffer -> tracker[index] != -1 && in -> buffer -> tracker[index] != readers )
 		{
 			value = in -> buffer -> array[index];
@@ -197,6 +199,8 @@ void* reader( void* voidIn )
 				index = 0;
 			}
 			printf( "Reader %d read %d\n", pid, value );
+
+			success = 1;
 		}
 
 		/* Wait for reader critical section to be free */
@@ -207,7 +211,14 @@ void* reader( void* voidIn )
 		}
 
 		/* Increment tracker for previously read cell */
-		in -> buffer -> tracker[index - 1]++;
+		if ( index != 0 && success )
+		{
+			in -> buffer -> tracker[index - 1]++;
+		}
+		else if ( success )
+		{
+			in -> buffer -> tracker[BUFF_LENGTH - 1]++;
+		}
 
 		/* Decrement count of currently active readers, signal writers if 0 */
 		reading--;

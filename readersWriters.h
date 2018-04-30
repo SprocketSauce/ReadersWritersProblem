@@ -7,7 +7,7 @@ typedef struct
 	int* reading;
 	int* writing;
 	DataBuffer* buffer;
-} writeIn;
+} WriterInput;
 
 typedef struct
 {
@@ -16,4 +16,8 @@ typedef struct
 	int* reading;
 	int* writing;
 	DataBuffer* buffer;
-} readIn;a
+} ReaderInput;
+
+void* reader( void* );
+
+void* writer( void* );

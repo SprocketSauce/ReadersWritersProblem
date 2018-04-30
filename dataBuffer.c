@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include "dataBuffer.h"
 
-DataBuffer* createBuffer( int length )
+DataBuffer* createBuffer( int length, int readers )
 {
 	int i;
 	DataBuffer* buff;
@@ -10,6 +10,8 @@ DataBuffer* createBuffer( int length )
 	buff -> array = malloc( length * sizeof(int) );
 	buff -> tracker = malloc( length * sizeof(int) );
 	buff -> length = length;
+	buff -> index = 0;
+	buff -> readers = readers;
 
 	/* Buffer cells that have not been written to have a tracker
 	 * value of -1 */
@@ -21,16 +23,16 @@ DataBuffer* createBuffer( int length )
 	return buff;
 }
 
-void writeTo( DataBuffer* buff, int index, int value )
+void writeTo( DataBuffer* buff, int value )
 {
 	buff -> tracker[index] = 0;
 	buff -> array[index] = value;
+	index++;
 }
 
-int readFrom( DataBuffer* buff, int index )
+int isFull( DataBuffer* buff )
 {
-	buff -> tracker[index]++;
-	return buff -> array[index];
+	return tracker[index] == readers;
 }
 
 void freeBuffer( DataBuffer* buff )

@@ -1,10 +1,13 @@
 CC = gcc
 CFLAGS = -Wall -Werror -pedantic -ansi -g -pthread
 EXEC = readersWriters
-OBJ = circularBuffer.o fileIO.o dataBuffer.o
+OBJ = readersWriters.o fileIO.o dataBuffer.o
 
-#$(EXEC) : $(OBJ)
-#	$(CC) $(OBJ) -o $(EXEC) -g
+$(EXEC) : $(OBJ)
+	$(CC) $(OBJ) -o $(EXEC) -g -pthread
+
+readersWriters.o : readersWriters.c readersWriters.h
+	$(CC) -c readersWriters.c $(CFLAGS)
 
 circularBuffer.o : circularBuffer.c circularBuffer.h
 	$(CC) -c circularBuffer.c $(CFLAGS)

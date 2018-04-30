@@ -25,14 +25,18 @@ DataBuffer* createBuffer( int length, int readers )
 
 void writeTo( DataBuffer* buff, int value )
 {
-	buff -> tracker[index] = 0;
-	buff -> array[index] = value;
-	index++;
+	buff -> tracker[buff -> index] = 0;
+	buff -> array[buff -> index] = value;
+	buff -> index++;
+	if ( buff -> index == buff -> length )
+	{
+		buff -> index = 0;
+	}
 }
 
 int isFull( DataBuffer* buff )
 {
-	return tracker[index] == readers;
+	return buff -> tracker[buff -> index] != -1 && buff -> tracker[buff -> index] != buff -> readers;
 }
 
 void freeBuffer( DataBuffer* buff )

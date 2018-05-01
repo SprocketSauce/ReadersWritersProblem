@@ -125,12 +125,7 @@ void* writer( void* voidIn )
 					writeTo( in -> buffer, value );
 					count++;
 					sdLength++;
-					printf( "Writer %d wrote %d to buffer\n", pid, value);
 				}
-			}
-			else if ( isFull( in -> buffer ) )
-			{
-				printf( "Buffer is full, not writing\n" );
 			}
 
 			writing = 0;
@@ -173,27 +168,23 @@ void* reader( void* voidIn )
 		if ( count != sdLength )
 		{
 			/* Wait for reader critical section to be free */
-			printf( "Reader %d attempting to access first critical section\n", pid );
 			pthread_mutex_lock( &rmutex );
 			if ( rcrit == 1 )
 			{
 				pthread_cond_wait( &rcond, &rmutex );
 			}
 			rcrit = 1;
-			printf( "Reader %d entering first critical section\n", pid );
 
 			/* Increment count of currently active readers */
 			reading++;
 
 			/* If this is the only active reader and there is an active writer, wait for 
 			 * writers to finish */
-			printf( "Reader %d attempting to access writer critical section\n", pid );
 			if ( reading == 1 && writing == 1 && !isFull( in -> buffer ) )
 			{
 				pthread_cond_wait( &wcond, &wmutex );
 			}
 
-			printf( "Reader %d freeing reader critical section\n", pid );
 			/* Free reader critical section */
 			rcrit = 0;
 			pthread_cond_signal( &rcond );
@@ -205,25 +196,23 @@ void* reader( void* voidIn )
 			if ( in -> buffer -> tracker[index] != -1 && in -> buffer -> tracker[index] != readers )
 			{
 				value = in -> buffer -> array[index];
+				printf( "Reader %d read %d\n", pid, value );
 				count++;
 				index++;
 				if ( index == BUFF_LENGTH )
 				{
 					index = 0;
 				}
-				printf( "Reader %d read %d\n", pid, value );
 				success = 1;
 			}
 
 			/* Wait for reader critical section to be free */
-			printf( "Reader %d attempting to access second critical section\n", pid );
 			pthread_mutex_lock( &rmutex );
 			if ( rcrit == 1 )
 			{
 				pthread_cond_wait( &rcond, &rmutex );
 			}
 			rcrit = 1;
-			printf( "Reader %d entering second critical section\n", pid );
 
 			/* Increment tracker for previously read cell */
 			if ( index != 0 && success )
@@ -249,7 +238,6 @@ void* reader( void* voidIn )
 			pthread_mutex_unlock( &rmutex );
 		}
 
-		printf( "Reader %d sleeping, count = %d, sdlen = %d\n", pid, count, sdLength );
 		sleep( in -> waitTime );
 	}
 

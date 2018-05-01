@@ -104,32 +104,39 @@ void* writer( void* voidIn )
 
 	while ( eof != EOF )
 	{
-		/* Waits for writer critical section to be free */
-		pthread_mutex_lock( &wmutex );
-		if ( reading >= 1 || writing == 1 )
+		if ( !isFull( in -> buffer ) )
 		{
-			pthread_cond_wait( &wcond, &wmutex );
-		}
-		writing = 1;
+			/* Waits for writer critical section to be free */
+			pthread_mutex_lock( &wmutex );
+			if ( reading >= 1 || writing == 1 )
+			{
+				pthread_cond_wait( &wcond, &wmutex );
+			}
+			writing = 1;
 		
-		/* If the buffer is not full, read from shared data and write to the buffer */
-		if ( !isFull( in -> buffer ) && eof != EOF )
-		{
-			eof = fscanf( in -> inFile, "%s", str );
-			value = atoi( str );
-			writeTo( in -> buffer, value );
-			count++;
-			sdLength++;
-			printf( "Writer %d wrote %d to buffer\n", pid, value);
-		}
-		else if ( isFull( in -> buffer ) )
-		{
-			printf( "Buffer is full, not writing\n" );
-		}
+			/* If the buffer is not full, read from shared data and write to the buffer */
+			if ( !isFull( in -> buffer ) && eof != EOF )
+			{
+				eof = fscanf( in -> inFile, "%s", str );
+				
+				if ( eof != EOF )
+				{
+					value = atoi( str );
+					writeTo( in -> buffer, value );
+					count++;
+					sdLength++;
+					printf( "Writer %d wrote %d to buffer\n", pid, value);
+				}
+			}
+			else if ( isFull( in -> buffer ) )
+			{
+				printf( "Buffer is full, not writing\n" );
+			}
 
-		writing = 0;
-		pthread_cond_signal( &wcond );
-		pthread_mutex_unlock( &wmutex );
+			writing = 0;
+			pthread_cond_signal( &wcond );
+			pthread_mutex_unlock( &wmutex );
+		}
 
 		sleep( in -> waitTime );
 	}
@@ -163,87 +170,86 @@ void* reader( void* voidIn )
 
 	while ( eof != EOF || count != sdLength )
 	{
-		/* Wait for reader critical section to be free */
-		printf( "Reader %d attempting to access first critical section\n", pid );
-		pthread_mutex_lock( &rmutex );
-		if ( rcrit == 1 )
+		if ( count != sdLength )
 		{
-			printf( "Reader %d waiting for first critical section\n", pid );
-			pthread_cond_wait( &rcond, &rmutex );
-		}
-		rcrit = 1;
-		printf( "Reader %d entering first critical section\n", pid );
-
-		/* Increment count of currently active readers */
-		reading++;
-
-		/* If this is the only active reader and there is an active writer, wait for 
-		 * writers to finish */
-		printf( "Reader %d attempting to access writer critical section\n", pid );
-		if ( reading == 1 && writing == 1 && !isFull( in -> buffer ) )
-		{
-			printf( "Reader %d waiting for writers\n", pid );
-			pthread_cond_wait( &wcond, &wmutex );
-		}
-
-		printf( "Reader %d freeing reader critical section\n", pid );
-		/* Free reader critical section */
-		rcrit = 0;
-		pthread_cond_signal( &rcond );
-		pthread_mutex_unlock( &rmutex );
-
-		/* Reads from the current cell of the data buffer, provided it has already been
-		 * written to and has not already been read */
-		success = 0;		
-		if ( in -> buffer -> tracker[index] != -1 && in -> buffer -> tracker[index] != readers )
-		{
-			value = in -> buffer -> array[index];
-			count++;
-			index++;
-			if ( index == BUFF_LENGTH )
+			/* Wait for reader critical section to be free */
+			printf( "Reader %d attempting to access first critical section\n", pid );
+			pthread_mutex_lock( &rmutex );
+			if ( rcrit == 1 )
 			{
-				index = 0;
+				pthread_cond_wait( &rcond, &rmutex );
 			}
-			printf( "Reader %d read %d\n", pid, value );
+			rcrit = 1;
+			printf( "Reader %d entering first critical section\n", pid );
 
-			success = 1;
+			/* Increment count of currently active readers */
+			reading++;
+
+			/* If this is the only active reader and there is an active writer, wait for 
+			 * writers to finish */
+			printf( "Reader %d attempting to access writer critical section\n", pid );
+			if ( reading == 1 && writing == 1 && !isFull( in -> buffer ) )
+			{
+				pthread_cond_wait( &wcond, &wmutex );
+			}
+
+			printf( "Reader %d freeing reader critical section\n", pid );
+			/* Free reader critical section */
+			rcrit = 0;
+			pthread_cond_signal( &rcond );
+			pthread_mutex_unlock( &rmutex );
+
+			/* Reads from the current cell of the data buffer, provided it has already been
+			 * written to and has not already been read */
+			success = 0;		
+			if ( in -> buffer -> tracker[index] != -1 && in -> buffer -> tracker[index] != readers )
+			{
+				value = in -> buffer -> array[index];
+				count++;
+				index++;
+				if ( index == BUFF_LENGTH )
+				{
+					index = 0;
+				}
+				printf( "Reader %d read %d\n", pid, value );
+				success = 1;
+			}
+
+			/* Wait for reader critical section to be free */
+			printf( "Reader %d attempting to access second critical section\n", pid );
+			pthread_mutex_lock( &rmutex );
+			if ( rcrit == 1 )
+			{
+				pthread_cond_wait( &rcond, &rmutex );
+			}
+			rcrit = 1;
+			printf( "Reader %d entering second critical section\n", pid );
+
+			/* Increment tracker for previously read cell */
+			if ( index != 0 && success )
+			{
+				in -> buffer -> tracker[index - 1]++;
+			}
+			else if ( success )
+			{
+				in -> buffer -> tracker[BUFF_LENGTH - 1]++;
+			}
+
+			/* Decrement count of currently active readers, signal writers if 0 */
+			reading--;
+			if ( reading == 0 )
+			{
+				pthread_cond_signal( &wcond );
+				pthread_mutex_unlock( &wmutex );
+			}
+
+			/* Free reader critical section */
+			rcrit = 0;
+			pthread_cond_signal( &rcond );
+			pthread_mutex_unlock( &rmutex );
 		}
 
-		/* Wait for reader critical section to be free */
-		printf( "Reader %d attempting to access second critical section\n", pid );
-		pthread_mutex_lock( &rmutex );
-		if ( rcrit == 1 )
-		{
-			printf( "Reader %d waiting for second critical section\n", pid );
-			pthread_cond_wait( &rcond, &rmutex );
-		}
-		rcrit = 1;
-		printf( "Reader %d entering second critical section\n", pid );
-
-		/* Increment tracker for previously read cell */
-		if ( index != 0 && success )
-		{
-			in -> buffer -> tracker[index - 1]++;
-		}
-		else if ( success )
-		{
-			in -> buffer -> tracker[BUFF_LENGTH - 1]++;
-		}
-
-		/* Decrement count of currently active readers, signal writers if 0 */
-		reading--;
-		if ( reading == 0 )
-		{
-			pthread_cond_signal( &wcond );
-			pthread_mutex_unlock( &wmutex );
-		}
-
-		/* Free reader critical section */
-		rcrit = 0;
-		pthread_cond_signal( &rcond );
-		pthread_mutex_unlock( &rmutex );
-
-		printf( "Reader %d sleeping, count = %d\n", pid, count );
+		printf( "Reader %d sleeping, count = %d, sdlen = %d\n", pid, count, sdLength );
 		sleep( in -> waitTime );
 	}
 

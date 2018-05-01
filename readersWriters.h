@@ -16,3 +16,5 @@ typedef struct
 void* reader( void* );
 
 void* writer( void* );
+
+void printToSimOut( FILE*, char[100] );

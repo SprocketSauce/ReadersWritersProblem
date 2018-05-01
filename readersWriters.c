@@ -96,7 +96,7 @@ void* writer( void* voidIn )
 {
 	int pid, value, count;
 	WriterInput* in;
-	char str[10];
+	char str[10], message[100];
 	
 	pid = pthread_self();
 	in = (WriterInput*)voidIn;
@@ -123,6 +123,7 @@ void* writer( void* voidIn )
 				{
 					value = atoi( str );
 					writeTo( in -> buffer, value );
+					printf( "Writer %d wrote %d\n", pid, value );
 					count++;
 					sdLength++;
 				}
@@ -136,32 +137,24 @@ void* writer( void* voidIn )
 		sleep( in -> waitTime );
 	}
 	
-	/* Waits for writer critical section to be free */
-	pthread_mutex_lock( &wmutex );
-	if ( writing == 1 )
-	{
-		pthread_cond_wait( &wcond, &wmutex );
-	}
-
 	/* Prints number of buffer writes to sim_out */
-	fprintf( in -> outFile, "Writer-%d has finished writing %d pieces of data to the data_buffer\n", pid, count );
-
-	/* Frees writer critical section */
-	pthread_cond_signal( &wcond );
-	pthread_mutex_unlock( &wmutex );
+	sprintf( message, "Writer-%d has finished writing %d pieces of data to the data_buffer\n", pid, count );
+	printToSimOut( in -> outFile, message );
 
 	return 0;
 }
 
 void* reader( void* voidIn )
 {
-	int value, pid, count, index, success;
+	int value, total, pid, count, index, success;
 	ReaderInput* in;
+	char message[100];
 	
 	pid = pthread_self();
 	in = (ReaderInput*)voidIn;
 	count = 0;
 	index = 0;
+	total = 0;
 
 	while ( eof != EOF || count != sdLength )
 	{
@@ -171,6 +164,7 @@ void* reader( void* voidIn )
 			pthread_mutex_lock( &rmutex );
 			if ( rcrit == 1 )
 			{
+				printf( "Reader %d waiting for readers", pid );
 				pthread_cond_wait( &rcond, &rmutex );
 			}
 			rcrit = 1;
@@ -180,10 +174,11 @@ void* reader( void* voidIn )
 
 			/* If this is the only active reader and there is an active writer, wait for 
 			 * writers to finish */
-			if ( reading == 1 && writing == 1 && !isFull( in -> buffer ) )
+			if ( reading == 1 && writing == 1 )
 			{
 				pthread_cond_wait( &wcond, &wmutex );
 			}
+			pthread_mutex_unlock( &wmutex );
 
 			/* Free reader critical section */
 			rcrit = 0;
@@ -196,6 +191,7 @@ void* reader( void* voidIn )
 			if ( in -> buffer -> tracker[index] != -1 && in -> buffer -> tracker[index] != readers )
 			{
 				value = in -> buffer -> array[index];
+				total += value;
 				printf( "Reader %d read %d\n", pid, value );
 				count++;
 				index++;
@@ -241,6 +237,15 @@ void* reader( void* voidIn )
 		sleep( in -> waitTime );
 	}
 
+	/* Prints number of buffer writes to sim_out */
+	sprintf( message, "Reader-%d has finished reading %d pieces of data from the data_buffer (total %d)\n", pid, count, total );
+	printToSimOut( in -> outFile, message );
+
+	return 0;
+}
+
+void printToSimOut( FILE* file, char message[100] )
+{
 	/* Waits for writer critical section to be free */
 	pthread_mutex_lock( &wmutex );
 	if ( writing == 1 )
@@ -249,11 +254,9 @@ void* reader( void* voidIn )
 	}
 
 	/* Prints number of buffer writes to sim_out */
-	fprintf( in -> outFile, "Reader-%d has finished reading %d pieces of data from the data_buffer\n", pid, count );
+	fprintf( file, message );
 
 	/* Frees writer critical section */
 	pthread_cond_signal( &wcond );
 	pthread_mutex_unlock( &wmutex );
-
-	return 0;
 }

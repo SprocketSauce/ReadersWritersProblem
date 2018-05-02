@@ -11,8 +11,7 @@
 /* ===== GLOBAL VARIABLES ===== */
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t outMutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t wcond = PTHREAD_COND_INITIALIZER;
-pthread_cond_t rcond = PTHREAD_COND_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 int sdLength = 0; /* Length of the shared data file */
 int eof = 0; /* Tracks whether then end of the file has been reached */
 int rcrit = 0; /* BOOL: is anything in the reader critical section? */
@@ -27,14 +26,41 @@ int main( int argc, char* argv[] )
 	WriterInput writeIn;
 	DataBuffer *buff;
 	pthread_t *rthreads, *wthreads;
-	int i;
+	int i, t1, t2;
 	FILE *inFile, *outFile;
+
+	if ( argc != 6 )
+	{
+		printf( "ERROR: Invalid number of input arguments.\n"\
+		"Correct usage: ./readersWriters [filename] [r] [w] [t1] [t2]\n"\
+		"filename = Name of file to be read\n"\
+		"r = Number of reader threads\n"\
+		"w = Number of writer threads\n"\
+		"t1 = Sleep time of reader threads\n"\
+		"t2 = Sleep time of writer threads\n" );
+		
+		return 1;
+	}
 
 	inFile = openFile( argv[1] );
 	outFile = fopen( "sim_out", "w" );
 
 	readers = atoi( argv[2] );
 	writers = atoi( argv[3] );
+	t1 = atoi( argv[4] );
+	t2 = atoi( argv[5] );
+
+	if ( readers < 1 || writers < 1 )
+	{
+		printf( "ERROR: Reader and writer numbers must be positive integers" );
+		return 1;
+	}
+
+	if ( t1 < 0 || t2 < 0 )
+	{
+		printf( "ERROR: Wait time must be a nonnegative integer" );
+		return 1;
+	}
 
 	rthreads = malloc( readers * sizeof(pthread_t) );
 	wthreads = malloc( writers * sizeof(pthread_t) );
@@ -48,12 +74,12 @@ int main( int argc, char* argv[] )
 	/* Create writer input struct */
 	writeIn.inFile = inFile;
 	writeIn.outFile = outFile;
-	writeIn.waitTime = atoi( argv[5] );
+	writeIn.waitTime = t2;
 	writeIn.buffer = buff;
 
 	/* Create reader input struct */
 	readIn.outFile = outFile;
-	readIn.waitTime = atoi( argv[4] );
+	readIn.waitTime = t1;
 	readIn.buffer = buff;
 	
 	/* Create writers */
@@ -108,7 +134,7 @@ void* writer( void* voidIn )
 		pthread_mutex_lock( &mutex );
 		if ( reading >= 1 )
 		{
-			pthread_cond_wait( &wcond, &mutex );
+			pthread_cond_wait( &cond, &mutex );
 		}
 	
 		/* If the buffer is not full, read from shared data and write to the buffer */
@@ -125,7 +151,7 @@ void* writer( void* voidIn )
 			}
 		}
 
-		pthread_cond_signal( &wcond );
+		pthread_cond_signal( &cond );
 		pthread_mutex_unlock( &mutex );
 		
 		sleep( in -> waitTime );
@@ -198,7 +224,7 @@ void* reader( void* voidIn )
 			reading--;
 			if ( reading == 0 )
 			{
-				pthread_cond_signal( &wcond );
+				pthread_cond_signal( &cond );
 			}
 
 			/* Free reader critical section */

@@ -9,8 +9,7 @@
 #define BUFF_LENGTH 20
 
 /* ===== GLOBAL VARIABLES ===== */
-pthread_mutex_t wmutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t rmutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t outMutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t wcond = PTHREAD_COND_INITIALIZER;
 pthread_cond_t rcond = PTHREAD_COND_INITIALIZER;
@@ -106,12 +105,11 @@ void* writer( void* voidIn )
 	while ( eof != EOF )
 	{
 		/* Waits for writer critical section to be free */
-		pthread_mutex_lock( &wmutex );
+		pthread_mutex_lock( &mutex );
 		if ( reading >= 1 )
 		{
-			pthread_cond_wait( &wcond, &wmutex );
+			pthread_cond_wait( &wcond, &mutex );
 		}
-		writing = 1;
 	
 		/* If the buffer is not full, read from shared data and write to the buffer */
 		if ( !isFull( in -> buffer ) && eof != EOF )
@@ -127,9 +125,8 @@ void* writer( void* voidIn )
 			}
 		}
 
-		writing = 0;
-		pthread_mutex_unlock( &wmutex );
 		pthread_cond_signal( &wcond );
+		pthread_mutex_unlock( &mutex );
 		
 		sleep( in -> waitTime );
 	}
@@ -158,24 +155,13 @@ void* reader( void* voidIn )
 		if ( count != sdLength )
 		{
 			/* Wait for reader critical section to be free */
-			pthread_mutex_lock( &rmutex );
+			pthread_mutex_lock( &mutex );
 			
 			/* Increment count of currently active readers */
 			reading++;
 
-			/* If this is the only active reader and there is an active writer, wait for 
-			 * writers to finish */
-			if ( reading == 1 && writing == 1 )
-			{
-				pthread_cond_wait( &wcond, &wmutex );
-			}
-			else if ( reading == 1 && writing == 0 )
-			{
-				pthread_mutex_lock( &wmutex );
-			}
-
 			/* Free reader critical section */
-			pthread_mutex_unlock( &rmutex );
+			pthread_mutex_unlock( &mutex );
 
 			/* Reads from the current cell of the data buffer, provided it has already been
 			 * written to and has not already been read */
@@ -184,7 +170,7 @@ void* reader( void* voidIn )
 				!= readers )
 			{
 				value = in -> buffer -> array[index];
-				/*printf( "Reader %d read %d\n", pid, value );*/
+				/*printf( "Reader %d read %d, count %d, sdlen %d\n", pid, value, count + 1, sdLength );*/
 				total += value;
 				count++;
 				index++;
@@ -196,7 +182,7 @@ void* reader( void* voidIn )
 			}
 
 			/* Wait for reader critical section to be free */
-			pthread_mutex_lock( &rmutex );
+			pthread_mutex_lock( &mutex );
 
 			/* Increment tracker for previously read cell */
 			if ( index != 0 && success )
@@ -213,11 +199,10 @@ void* reader( void* voidIn )
 			if ( reading == 0 )
 			{
 				pthread_cond_signal( &wcond );
-				pthread_mutex_unlock( &wmutex );
 			}
 
 			/* Free reader critical section */
-			pthread_mutex_unlock( &rmutex );
+			pthread_mutex_unlock( &mutex );
 		}
 
 		sleep( in -> waitTime );

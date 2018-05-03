@@ -5,11 +5,13 @@
 FILE* openFile( char* filename )
 {
 	FILE* file;
+	char message[100];
 
 	file = fopen( filename, "r" );
 	if ( file == NULL )
 	{
-		perror( "Error opening shared data" );
+		sprintf( message, "Error opening %s", filename );
+		perror( message );
 	}
 
 	return file;

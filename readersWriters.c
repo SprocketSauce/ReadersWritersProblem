@@ -50,6 +50,11 @@ int main( int argc, char* argv[] )
 	t1 = atoi( argv[4] );
 	t2 = atoi( argv[5] );
 
+	if ( inFile == NULL || outFile == NULL )
+	{
+		return 1;
+	}
+
 	if ( readers < 1 || writers < 1 )
 	{
 		printf( "ERROR: Reader and writer numbers must be positive integers" );
@@ -167,7 +172,7 @@ void* writer( void* voidIn )
 	sprintf( message, "Writer %d has finished writing %d pieces of data to the data_buffer\n", pid, count );
 	printToSimOut( in -> outFile, message );
 
-	return 0;
+	pthread_exit( 0 );
 }
 
 void* reader( void* voidIn )
@@ -244,7 +249,7 @@ void* reader( void* voidIn )
 	sprintf( message, "Reader %d has finished reading %d pieces of data from the data_buffer (total %d)\n", pid, count, total );
 	printToSimOut( in -> outFile, message );
 
-	return 0;
+	pthread_exit( 0 );
 }
 
 void printToSimOut( FILE* file, char message[100] )

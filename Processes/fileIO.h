@@ -1,0 +1,1 @@
+int* readFile( char*, int* );

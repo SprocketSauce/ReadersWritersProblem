@@ -25,9 +25,9 @@ int main( int argc, char* argv[] )
 	RWSemaphores *sem;
 	Flags *flags;
 	pthread_t *rthreads, *wthreads;
-	int i, t1, t2, pid, readers, writers;
+	int i, t1, t2, pid, readers, writers, *sharedData, sdLength;
 	int buffSM, semSM, flagSM, inFileSM, outFileSM;
-	FILE *inFile, *outFile;
+	FILE *outFile;
 
 	if ( argc != 6 )
 	{
@@ -42,18 +42,12 @@ int main( int argc, char* argv[] )
 		return 1;
 	}
 
-	inFile = openFile( argv[1] );
 	outFile = fopen( "sim_out", "w" );
 
 	readers = atoi( argv[2] );
 	writers = atoi( argv[3] );
 	t1 = atoi( argv[4] );
 	t2 = atoi( argv[5] );
-
-	if ( inFile == NULL || outFile == NULL )
-	{
-		return 1;
-	}
 
 	if ( readers < 1 || writers < 1 )
 	{
@@ -73,15 +67,11 @@ int main( int argc, char* argv[] )
 	semSM = shm_open( "semaphores", O_CREAT | O_RDWR, 0666 );
 	buffSM = shm_open( "buffer", O_CREAT | O_RDWR, 0666 );
 	flagSM = shm_open( "flags", O_CREAT | O_RDWR, 0666 );
-	inFileSM = shm_open( "input file", O_CREAT | O_RDWR, 0666 );
-	outFileSM = shm_open( "output file", O_CREAT | O_RDWR, 0666 );
 
 	/* Truncate shared memory segments */
-	ftruncate( semSM, sizeof( RWSemaphores );
-	ftruncate( buffSM, sizeof( DataBuffer );
-	ftruncate( flagSM, sizeof( Flags );
-	ftruncate( inFileSM, sizeof( FILE );
-	ftruncate( outFileSM, sizeof( FILE );
+	ftruncate( semSM, sizeof( RWSemaphores ) );
+	ftruncate( buffSM, sizeof( DataBuffer ) );
+	ftruncate( flagSM, sizeof( Flags ) );
 
 	/* Map shared memory segments */
 	sem = (RWSemaphores*)mmap( NULL, sizeof( RWSemaphores ), PROT_READ | PROT_WRITE,
@@ -90,25 +80,24 @@ int main( int argc, char* argv[] )
 		MAP_SHARED, buffSM, 0 );
 	flags = (Flags*)mmap( NULL, sizeof( Flags ), PROT_READ | PROT_WRITE, MAP_SHARED,
 		flagSM, 0 );
-	inFile = (FILE*)mmap( NULL, sizeof( FILE ), PROT_READ | PROT_WRITE, MAP_SHARED,
-		inFileSM, 0 );
-	outFile = (FILE*)mmap( NULL, sizeof( FILE ), PROT_READ | PROT_WRITE, MAP_SHARED,
-		outFileSM, 0 );
 	
-
 	/* Initialise semaphores */
 	sem_init( sem -> mutex, 1 );
 	sem_init( sem -> outMutex, 1 );
 	sem_init( sem -> cond, 0 );
+	sem_init( sem -> wrt, 1 );
 
 	/* Initialise data buffer */
 	buff = createBuffer( BUFF_LENGTH, readers );
 
 	/* Initialise flags */
-	flags -> sdLength = 0;
+	flags -> wIndex = 0;
 	flags -> eof = 0;
 	flags -> reading = 0;
 	
+	/* Read shared data from file */
+	sharedData = readFile( argv[1], &sdLength );
+
 	/* Create writers */
 	i = 0;
 	while ( i < writers && pid != 0 )
@@ -136,59 +125,43 @@ int main( int argc, char* argv[] )
 		/* WIP: EXECUTE READER PROCESS */
 		_exit(0);			
 	}
-		
-	/* Close files */
-	fclose( inFile );
-	fclose( outFile );
-
+	
 	printf( "%d items successfully read, results printed to sim_out\n", sdLength );
 
-	pthread_mutex_destroy( &mutex );
-	pthread_mutex_destroy( &outMutex );
-	pthread_cond_destroy( &cond );
-
-	/* Free allocated memory */
-	freeBuffer( buff );
-	free( rthreads );
-	free( wthreads );
-
+	/* Free shared memory */
+	close( semSM );
+	close( buffSM );
+	close( flagSM );
 	return 0;
 }
 
-void* writer( void* voidIn )
+void writer( RWSemaphores* sem, DataBuffer* buffer, Flags* flags, int sdLength )
 {
 	int pid, value, count;
-	WriterInput* in;
 	char str[10], message[100];
 	
-	pid = pthread_self();
-	in = (WriterInput*)voidIn;
+	pid = getpid();
 	count = 0;
 
-	while ( eof != EOF )
+	while ( flags -> wIndex < sdLength )
 	{
 		/* Waits for writer critical section to be free */
-		pthread_mutex_lock( &mutex );
-		if ( reading >= 1 )
+		sem_wait( &sem -> wrt );
+		if ( flags -> reading >= 1 )
 		{
-			pthread_cond_wait( &cond, &mutex );
+			sem_wait( &sem -> cond );
 		}
 	
 		/* If the buffer is not full, read from shared data and write to the buffer */
-		if ( !isFull( in -> buffer ) && eof != EOF )
+		if ( !isFull( buffer ) && flags -> wIndex < sdLength )
 		{
-			eof = fscanf( in -> inFile, "%s", str );
-			
-			if ( eof != EOF )
-			{
-				value = atoi( str );
-				writeTo( in -> buffer, value );
-				count++;
-				sdLength++;
-			}
+			value = buffer -> array[flags -> wIndex];
+			writeTo( in -> buffer, value );
+			count++;
+			flags -> wIndex++;
 		}
 
-		pthread_cond_signal( &cond );
+		( &cond );
 		pthread_mutex_unlock( &mutex );
 		
 		sleep( in -> waitTime );

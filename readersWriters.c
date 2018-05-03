@@ -110,6 +110,12 @@ int main( int argc, char* argv[] )
 	fclose( inFile );
 	fclose( outFile );
 
+	printf( "%d items successfully read, results printed to sim_out\n", sdLength );
+
+	pthread_mutex_destroy( &mutex );
+	pthread_mutex_destroy( &outMutex );
+	pthread_cond_destroy( &cond );
+
 	/* Free allocated memory */
 	freeBuffer( buff );
 	free( rthreads );

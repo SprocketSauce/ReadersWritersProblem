@@ -1,29 +1,41 @@
+#define _GNU_SOURCE 1
 #include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 #include "dataBuffer.h"
 
 DataBuffer* createBuffer( int length, int readers )
 {
-	int i, arraySM, trackSM;
+	int i, fd;
 	DataBuffer* buff;
+
+	fd = shm_open( "buffer", O_CREAT | O_RDWR, 0666 );
+	ftruncate( fd, sizeof( DataBuffer ) );
+	buff = (DataBuffer*)mmap( NULL, sizeof( DataBuffer ), PROT_READ | PROT_WRITE,
+		MAP_SHARED, fd, 0 );
 	
-	buff = malloc( sizeof(DataBuffer) );
+	buff -> buffSM = fd;
 	buff -> length = length;
 	buff -> index = 0;
 	buff -> readers = readers;
 
 	/* Create shared memory segments */
-	arraySM = shm_open( "array", O_CREAT | O_RDWR, 0666 );
-	trackSM = shm_open( "buffer", O_CREAT | O_RDWR, 0666 );
+	buff -> arraySM = shm_open( "array", O_CREAT | O_RDWR, 0666 );
+	buff -> trackSM = shm_open( "buffer", O_CREAT | O_RDWR, 0666 );
 
 	/* Truncate shared memory segments */
-	ftruncate( arraySM, sizeof(int) * length );
-	ftruncate( trackSM, sizeof(int) * length );
+	ftruncate( buff -> arraySM, sizeof(int) * length );
+	ftruncate( buff -> trackSM, 80 );
 
 	/* Map shared memory segments */
 	buff -> array = (int*)mmap( NULL, sizeof(int) * length, PROT_READ | PROT_WRITE, 
-		MAP_SHARED,	arraySM, 0 );
-	buff -> tracker = (int*)mmap( NULL, sizeof(int) * length, PROT_READ | PROT_WRITE, 
-		MAP_SHARED, trackSM, 0 );
+		MAP_SHARED | MAP_ANONYMOUS, buff -> arraySM, 0 );
+	buff -> tracker = (int*)mmap( NULL, sizeof(int), PROT_READ | PROT_WRITE, 
+		MAP_SHARED | MAP_ANONYMOUS, buff -> trackSM, 0 );
 
 	/* Buffer cells that have not been written to have a tracker value of -1 */
 	for ( i = 0; i < length; i++ )
@@ -52,7 +64,7 @@ int isFull( DataBuffer* buff )
 
 void freeBuffer( DataBuffer* buff )
 {
-	free( buff -> array );
-	free( buff -> tracker );
-	free( buff );
+	close( buff -> arraySM );
+	close( buff -> trackSM );
+	close( buff -> buffSM );
 }

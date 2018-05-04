@@ -5,6 +5,9 @@ typedef struct
 	int length;
 	int index;
 	int readers;
+	int buffSM;
+	int arraySM;
+	int trackSM;
 } DataBuffer;
 
 DataBuffer* createBuffer( int, int );

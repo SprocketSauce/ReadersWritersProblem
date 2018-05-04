@@ -1,3 +1,5 @@
+#define _GNU_SOURCE 1
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/types.h>
@@ -5,6 +7,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <semaphore.h>
+#include <fcntl.h>
 #include "fileIO.h"
 #include "dataBuffer.h"
 #include "readersWriters.h"
@@ -19,15 +22,15 @@ int readers = 0; /* Total number of readers */
 
 int main( int argc, char* argv[] )
 {
-	ReaderInput readIn;
-	WriterInput writeIn;
 	DataBuffer *buff;
 	RWSemaphores *sem;
 	Flags *flags;
-	pthread_t *rthreads, *wthreads;
 	int i, t1, t2, pid, readers, writers, *sharedData, sdLength;
-	int buffSM, semSM, flagSM, inFileSM, outFileSM;
-	FILE *outFile;
+	int semSM, flagSM;
+	FILE* file;
+
+	file = fopen( "sim_out", "w" );
+	fclose( file );
 
 	if ( argc != 6 )
 	{
@@ -41,8 +44,6 @@ int main( int argc, char* argv[] )
 		
 		return 1;
 	}
-
-	outFile = fopen( "sim_out", "w" );
 
 	readers = atoi( argv[2] );
 	writers = atoi( argv[3] );
@@ -65,80 +66,93 @@ int main( int argc, char* argv[] )
 
 	/* Create shared memory segments */
 	semSM = shm_open( "semaphores", O_CREAT | O_RDWR, 0666 );
-	buffSM = shm_open( "buffer", O_CREAT | O_RDWR, 0666 );
 	flagSM = shm_open( "flags", O_CREAT | O_RDWR, 0666 );
 
 	/* Truncate shared memory segments */
 	ftruncate( semSM, sizeof( RWSemaphores ) );
-	ftruncate( buffSM, sizeof( DataBuffer ) );
 	ftruncate( flagSM, sizeof( Flags ) );
 
 	/* Map shared memory segments */
 	sem = (RWSemaphores*)mmap( NULL, sizeof( RWSemaphores ), PROT_READ | PROT_WRITE,
-		MAP_SHARED, semSM, 0 );
-	buff = (DataBuffer*)mmap( NULL, sizeof( DataBuffer ), PROT_READ | PROT_WRITE,
-		MAP_SHARED, buffSM, 0 );
-	flags = (Flags*)mmap( NULL, sizeof( Flags ), PROT_READ | PROT_WRITE, MAP_SHARED,
-		flagSM, 0 );
+		MAP_SHARED | MAP_ANONYMOUS, semSM, 0 );
+	flags = (Flags*)mmap( NULL, sizeof( Flags ), PROT_READ | PROT_WRITE, MAP_SHARED |
+		MAP_ANONYMOUS, flagSM, 0 );
 	
 	/* Initialise semaphores */
-	sem_init( sem -> mutex, 1 );
-	sem_init( sem -> outMutex, 1 );
-	sem_init( sem -> cond, 0 );
-	sem_init( sem -> wrt, 1 );
+	sem_init( &sem -> mutex, 1, 1 );
+	sem_init( &sem -> outMutex, 1, 1 );
+	sem_init( &sem -> cond, 1, 0 );
+	sem_init( &sem -> wrt, 1, 1 );
+	sem_init( &sem -> done, 1, 0 );
 
 	/* Initialise data buffer */
 	buff = createBuffer( BUFF_LENGTH, readers );
-
+		
 	/* Initialise flags */
 	flags -> wIndex = 0;
 	flags -> reading = 0;
 	flags -> writing = 0;
+	flags -> finished = 0;
 	
 	/* Read shared data from file */
 	sharedData = readFile( argv[1], &sdLength );
 
 	/* Create writers */
 	i = 0;
+	pid = getpid();
 	while ( i < writers && pid != 0 )
 	{
+		i++;
 		pid = fork();
-	}
-
-	/* Child processes execute writer */
-	if ( pid == 0 )
-	{
-		/* WIP: EXECUTE WRITER PROCESS */
-		_exit(0);
+		if ( pid == 0 )
+		{
+			writer( sem, buff, flags, sdLength, t2, sharedData );
+		}
 	}
 
 	/* Create readers */
 	i = 0;
 	while ( i < readers && pid != 0 )
 	{
+		i++;
 		pid = fork();
+		if ( pid == 0 )
+		{
+			reader( sem, buff, flags, sdLength, readers, t1 );
+		}
 	}
 
-	/* Child processes execute reader */
+	/* Finish child processes */
 	if ( pid == 0 )
 	{
-		/* WIP: EXECUTE READER PROCESS */
-		_exit(0);			
+		markFinished( sem, flags, readers + writers );
+		_exit(0);
 	}
+
+	/* Wait for child processes to finish */
+	sem_wait( &sem -> done );
 	
 	printf( "%d items successfully read, results printed to sim_out\n", sdLength );
 
+	/* Destroy semaphores */
+	sem_destroy( &sem -> mutex );
+	sem_destroy( &sem -> outMutex );
+	sem_destroy( &sem -> wrt );
+	sem_destroy( &sem -> cond );
+	sem_destroy( &sem -> done );
+
 	/* Free shared memory */
+	free( sharedData );
+	freeBuffer( buff );
 	close( semSM );
-	close( buffSM );
 	close( flagSM );
 	return 0;
 }
 
-void writer( RWSemaphores* sem, DataBuffer* buffer, Flags* flags, int sdLength, int waitTime )
+void writer( RWSemaphores* sem, DataBuffer* buffer, Flags* flags, int sdLength, int waitTime, int* sharedData )
 {
 	int pid, value, count;
-	char str[10], message[100];
+	char message[100];
 	
 	pid = getpid();
 	count = 0;
@@ -146,18 +160,19 @@ void writer( RWSemaphores* sem, DataBuffer* buffer, Flags* flags, int sdLength, 
 	while ( flags -> wIndex < sdLength )
 	{
 		/* Waits for writer critical section to be free */
-		sem_wait( &sem -> wrt );
+		sem_wait( &sem -> wrt );/*
 		if ( flags -> reading >= 1 )
 		{
+			printf( "WRITER %d WAITING FOR COND\n", pid );
 			sem_wait( &sem -> cond );
-		}
+		}*/
 		flags -> writing = 1;
 	
 		/* If the buffer is not full, read from shared data and write to the buffer */
 		if ( !isFull( buffer ) && flags -> wIndex < sdLength )
 		{
-			value = buffer -> array[flags -> wIndex];
-			writeTo( in -> buffer, value );
+			value = sharedData[flags -> wIndex];
+			writeTo( buffer, value );
 			count++;
 			flags -> wIndex++;
 		}
@@ -172,7 +187,7 @@ void writer( RWSemaphores* sem, DataBuffer* buffer, Flags* flags, int sdLength, 
 	
 	/* Prints number of buffer writes to sim_out */
 	sprintf( message, "Writer %d has finished writing %d pieces of data to the data_buffer\n", pid, count );
-	printToSimOut( in -> outFile, message );
+	printToSimOut( sem, message );
 }
 
 void reader( RWSemaphores* sem, DataBuffer* buffer, Flags* flags, int sdLength, int readers, int waitTime )
@@ -180,83 +195,109 @@ void reader( RWSemaphores* sem, DataBuffer* buffer, Flags* flags, int sdLength, 
 	int value, pid, count, index, success, total;
 	char message[100];
 	
-	pid = pthread_self();
+	pid = getpid();
 	count = 0;
 	index = 0;
 	total = 0;
-
+	
 	while ( count < sdLength )
 	{
-		/* Wait for reader critical section to be free */
-		sem_wait( &sem -> mutex );
-
-		/* Increment count of currently active readers */
-		flags -> reading++;
-
-		/* If this is the first reader and there is an active writer, wait for the writer
-		to finish */
-		if ( flags -> reading == 1 && flags -> writing == 1 )
+		if ( count != flags -> wIndex )
 		{
-			sem_wait( &sem -> wrt );
-		}
-		
-		/* Free reader critical section */
-		pthread_mutex_unlock( &mutex );
+			/* Wait for reader critical section to be free */
+			sem_wait( &sem -> mutex );
 
-		/* Reads from the current cell of the data buffer, provided it has already been
-		 * written to and has not already been read */
-		success = 0;
-		if ( buffer -> tracker[index] != -1 && buffer -> tracker[index]	!= readers )
-		{
-			value = buffer -> array[index];
-			/*printf( "Reader %d read %d, count %d, sdlen %d\n", pid, value, count + 1, sdLength );*/
-			total += value;
-			count++;
-			index++;
-			if ( index == BUFF_LENGTH )
+			/* Increment count of currently active readers */
+			flags -> reading++;
+
+			/* If this is the first reader and there is an active writer, wait for the 
+			 * writer to finish */
+			if ( flags -> reading == 1 /*&& flags -> writing == 1*/ )
 			{
-				index = 0;
+				sem_wait( &sem -> wrt );
 			}
-			success = 1;
-		}
+		
+			/* Free reader critical section */
+			sem_post( &sem -> mutex );
 
-		/* Wait for reader critical section to be free */
-		sem_wait( &sem -> mutex );
+			/* Reads from the current cell of the data buffer, provided it has already been
+			 * written to and has not already been read */
+			success = 0;
+			if ( buffer -> tracker[index] != -1 && buffer -> tracker[index]	!= readers )
+			{
+				value = buffer -> array[index];
+				total += value;
+				count++;
+				index++;
+				if ( index == BUFF_LENGTH )
+				{
+					index = 0;
+				}
+				success = 1;
+			}
+			else
+			{
+				printf( "READ FAILED\n" );
+			}
 
-		/* Increment tracker for previously read cell */
-		if ( index != 0 && success )
-		{
-			buffer -> tracker[index - 1]++;
-		}
-		else if ( success )
-		{
-			buffer -> tracker[BUFF_LENGTH - 1]++;
-		}
+			/* Wait for reader critical section to be free */
+			sem_wait( &sem -> mutex );
 
-		/* Decrement count of currently active readers, signal writers if 0 */
-		flags -> reading--;
-		if ( flags -> reading == 0 )
-		{
-			sem_post( &sem -> cond );
-		}
+			/* Increment tracker for previously read cell */
+			if ( index != 0 && success )
+			{
+				buffer -> tracker[index - 1]++;
+			}
+			else if ( success )
+			{
+				buffer -> tracker[BUFF_LENGTH - 1]++;
+			}
 
-		/* Free reader critical section */
-		sem_post( &sem -> mutex );
+			/* Decrement count of currently active readers, signal writers if 0 */
+			flags -> reading--;
+			if ( flags -> reading == 0 )
+			{
+				sem_post( &sem -> wrt );
+			}
+
+			/* Free reader critical section */
+			sem_post( &sem -> mutex );
 	
-		/* Performs busy wait */
-		sleep( waitTime );
+			/* Performs busy wait */
+			sleep( waitTime );
+		}
 	}
 
 	/* Prints number of buffer writes to sim_out */
 	sprintf( message, "Reader %d has finished reading %d pieces of data from the data_buffer (total %d)\n", pid, count, total );
-	printToSimOut( in -> outFile, message );
+	printToSimOut( sem, message );
 }
 
-void printToSimOut( FILE* file, char message[100] )
+void printToSimOut( RWSemaphores* sem, char message[100] )
 {
-	pthread_mutex_lock( &outMutex );
+	FILE* file;
 	
+	sem_wait( &sem -> outMutex );
+	
+	file = fopen( "sim_out", "a" );
 	fprintf( file, message );
+	fclose( file );
 
-	pthread_mutex_unlock( &outMutex );
+	sem_post( &sem -> outMutex );
+}
+
+void markFinished( RWSemaphores* sem, Flags* flags, int processes )
+{
+	sem_wait( &sem -> outMutex );
+	
+	/* Increment number of finished processes */
+	flags -> finished++;
+
+	/* If all processes are finished, allow parent process to continue */
+	if ( flags -> finished == processes )
+	{
+		sem_post( &sem -> done );
+	}
+
+	sem_post( &sem -> outMutex );
 }

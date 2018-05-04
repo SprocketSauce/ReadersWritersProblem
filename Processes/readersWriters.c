@@ -92,8 +92,8 @@ int main( int argc, char* argv[] )
 
 	/* Initialise flags */
 	flags -> wIndex = 0;
-	flags -> eof = 0;
 	flags -> reading = 0;
+	flags -> writing = 0;
 	
 	/* Read shared data from file */
 	sharedData = readFile( argv[1], &sdLength );
@@ -135,7 +135,7 @@ int main( int argc, char* argv[] )
 	return 0;
 }
 
-void writer( RWSemaphores* sem, DataBuffer* buffer, Flags* flags, int sdLength )
+void writer( RWSemaphores* sem, DataBuffer* buffer, Flags* flags, int sdLength, int waitTime )
 {
 	int pid, value, count;
 	char str[10], message[100];
@@ -151,6 +151,7 @@ void writer( RWSemaphores* sem, DataBuffer* buffer, Flags* flags, int sdLength )
 		{
 			sem_wait( &sem -> cond );
 		}
+		flags -> writing = 1;
 	
 		/* If the buffer is not full, read from shared data and write to the buffer */
 		if ( !isFull( buffer ) && flags -> wIndex < sdLength )
@@ -161,94 +162,94 @@ void writer( RWSemaphores* sem, DataBuffer* buffer, Flags* flags, int sdLength )
 			flags -> wIndex++;
 		}
 
-		( &cond );
-		pthread_mutex_unlock( &mutex );
+		/* Frees the writer critical section */
+		flags -> writing = 0;
+		sem_post( &sem -> wrt );
 		
-		sleep( in -> waitTime );
+		/* Performs busy wait */
+		sleep( waitTime );
 	}
 	
 	/* Prints number of buffer writes to sim_out */
 	sprintf( message, "Writer %d has finished writing %d pieces of data to the data_buffer\n", pid, count );
 	printToSimOut( in -> outFile, message );
-
-	pthread_exit( 0 );
 }
 
-void* reader( void* voidIn )
+void reader( RWSemaphores* sem, DataBuffer* buffer, Flags* flags, int sdLength, int readers, int waitTime )
 {
 	int value, pid, count, index, success, total;
 	char message[100];
-	ReaderInput* in;
 	
 	pid = pthread_self();
-	in = (ReaderInput*)voidIn;
 	count = 0;
 	index = 0;
 	total = 0;
 
-	while ( eof != EOF || count != sdLength )
+	while ( count < sdLength )
 	{
-		if ( count != sdLength )
+		/* Wait for reader critical section to be free */
+		sem_wait( &sem -> mutex );
+
+		/* Increment count of currently active readers */
+		flags -> reading++;
+
+		/* If this is the first reader and there is an active writer, wait for the writer
+		to finish */
+		if ( flags -> reading == 1 && flags -> writing == 1 )
 		{
-			/* Wait for reader critical section to be free */
-			pthread_mutex_lock( &mutex );
-			
-			/* Increment count of currently active readers */
-			reading++;
+			sem_wait( &sem -> wrt );
+		}
+		
+		/* Free reader critical section */
+		pthread_mutex_unlock( &mutex );
 
-			/* Free reader critical section */
-			pthread_mutex_unlock( &mutex );
-
-			/* Reads from the current cell of the data buffer, provided it has already been
-			 * written to and has not already been read */
-			success = 0;
-			if ( in -> buffer -> tracker[index] != -1 && in -> buffer -> tracker[index] 
-				!= readers )
+		/* Reads from the current cell of the data buffer, provided it has already been
+		 * written to and has not already been read */
+		success = 0;
+		if ( buffer -> tracker[index] != -1 && buffer -> tracker[index]	!= readers )
+		{
+			value = buffer -> array[index];
+			/*printf( "Reader %d read %d, count %d, sdlen %d\n", pid, value, count + 1, sdLength );*/
+			total += value;
+			count++;
+			index++;
+			if ( index == BUFF_LENGTH )
 			{
-				value = in -> buffer -> array[index];
-				/*printf( "Reader %d read %d, count %d, sdlen %d\n", pid, value, count + 1, sdLength );*/
-				total += value;
-				count++;
-				index++;
-				if ( index == BUFF_LENGTH )
-				{
-					index = 0;
-				}
-				success = 1;
+				index = 0;
 			}
-
-			/* Wait for reader critical section to be free */
-			pthread_mutex_lock( &mutex );
-
-			/* Increment tracker for previously read cell */
-			if ( index != 0 && success )
-			{
-				in -> buffer -> tracker[index - 1]++;
-			}
-			else if ( success )
-			{
-				in -> buffer -> tracker[BUFF_LENGTH - 1]++;
-			}
-
-			/* Decrement count of currently active readers, signal writers if 0 */
-			reading--;
-			if ( reading == 0 )
-			{
-				pthread_cond_signal( &cond );
-			}
-
-			/* Free reader critical section */
-			pthread_mutex_unlock( &mutex );
+			success = 1;
 		}
 
-		sleep( in -> waitTime );
+		/* Wait for reader critical section to be free */
+		sem_wait( &sem -> mutex );
+
+		/* Increment tracker for previously read cell */
+		if ( index != 0 && success )
+		{
+			buffer -> tracker[index - 1]++;
+		}
+		else if ( success )
+		{
+			buffer -> tracker[BUFF_LENGTH - 1]++;
+		}
+
+		/* Decrement count of currently active readers, signal writers if 0 */
+		flags -> reading--;
+		if ( flags -> reading == 0 )
+		{
+			sem_post( &sem -> cond );
+		}
+
+		/* Free reader critical section */
+		sem_post( &sem -> mutex );
+	
+		/* Performs busy wait */
+		sleep( waitTime );
 	}
 
 	/* Prints number of buffer writes to sim_out */
 	sprintf( message, "Reader %d has finished reading %d pieces of data from the data_buffer (total %d)\n", pid, count, total );
 	printToSimOut( in -> outFile, message );
-
-	pthread_exit( 0 );
 }
 
 void printToSimOut( FILE* file, char message[100] )

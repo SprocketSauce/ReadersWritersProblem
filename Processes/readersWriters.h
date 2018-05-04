@@ -9,8 +9,8 @@ typedef struct
 typedef struct
 {
 	int wIndex;
-	int eof;
 	int reading;
+	int writing;
 } Flags;
 
 void* reader( void* );

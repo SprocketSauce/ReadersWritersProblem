@@ -1,12 +1,17 @@
-#include <stdlib.h>
-#include <stdio.h>
-#include <pthread.h>
-#include <unistd.h>
-#include "fileIO.h"
-#include "dataBuffer.h"
-#include "readersWriters.h"
+/* =============================================================================
+ * FILE:     readersWriters.c
+ * AUTHOR:   Jack McNair 18927430
+ * UNIT:     COMP2006 - Operating Systems
+ * LAST MOD: 06/05/2018
+ * REQUIRES: fileIO.h, fileIO.c, dataBuffer.h, dataBuffer.c, readersWriters.h
+ *
+ * PURPOSE:  Implements POSIX multithreading in order to write values from a
+ *           file to a data buffer, then read those values. Prints results
+ *           to a file called sim_out.
+ * =============================================================================
+ */
 
-#define BUFF_LENGTH 20
+#include "readersWriters.h"
 
 /* ===== GLOBAL VARIABLES ===== */
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -14,14 +19,13 @@ pthread_mutex_t outMutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 int sdLength = 0; /* Length of the shared data file */
 int eof = 0; /* Tracks whether then end of the file has been reached */
-int rcrit = 0; /* BOOL: is anything in the reader critical section? */
 int reading = 0; /* Number of readers reading */
-int writing = 0; /* BOOL: is anything writing? */
 int readers = 0; /* Total number of readers */
 int writers = 0; /* Total number of writers */
 
 int main( int argc, char* argv[] )
 {
+	/* ===== LOCAL VARIABLES ===== */
 	ReaderInput readIn;
 	WriterInput writeIn;
 	DataBuffer *buff;
@@ -29,6 +33,7 @@ int main( int argc, char* argv[] )
 	int i, t1, t2;
 	FILE *inFile, *outFile;
 
+	/* Prints an error if there is an incorrect number of input arguments */
 	if ( argc != 6 )
 	{
 		printf( "ERROR: Invalid number of input arguments.\n"\
@@ -42,36 +47,40 @@ int main( int argc, char* argv[] )
 		return 1;
 	}
 
+	/* Opens the input file */
 	inFile = openFile( argv[1] );
+
+	/* Opens the output file */
 	outFile = fopen( "sim_out", "w" );
 
+	/* Initialises number of readers, writers and wait times using input
+	 * arguments */
 	readers = atoi( argv[2] );
 	writers = atoi( argv[3] );
 	t1 = atoi( argv[4] );
 	t2 = atoi( argv[5] );
 
+	/* Exits if either file did not open correctly */
 	if ( inFile == NULL || outFile == NULL )
 	{
 		return 1;
 	}
 
+	/* Exits if inputs are invalid */
 	if ( readers < 1 || writers < 1 )
 	{
 		printf( "ERROR: Reader and writer numbers must be positive integers" );
 		return 1;
 	}
-
 	if ( t1 < 0 || t2 < 0 )
 	{
 		printf( "ERROR: Wait time must be a nonnegative integer" );
 		return 1;
 	}
 
+	/* Allocates memory space for threads */
 	rthreads = malloc( readers * sizeof(pthread_t) );
 	wthreads = malloc( writers * sizeof(pthread_t) );
-
-	reading = 0;
-	writing = 0;
 
 	/* Initialise data buffer */
 	buff = createBuffer( BUFF_LENGTH, readers );
@@ -117,6 +126,7 @@ int main( int argc, char* argv[] )
 
 	printf( "%d items successfully read, results printed to sim_out\n", sdLength );
 
+	/* Destroys mutexes and conditional */
 	pthread_mutex_destroy( &mutex );
 	pthread_mutex_destroy( &outMutex );
 	pthread_cond_destroy( &cond );
@@ -129,6 +139,25 @@ int main( int argc, char* argv[] )
 	return 0;
 }
 
+/*	============================================================================
+ *	FUNCTION: writer
+ *	IMPORTS:  voidIn, a void pointer pointing to a WriterInput struct. This
+ *	struct has 4 fields:
+ *            inFile:   pointer to the input file
+ *            outFile:  pointer to the output file
+ *            waitTime: integer indicating sleep time in seconds
+ *            buffer:   pointer to the data buffer, represented by a DataBuffer
+ *            			struct.
+ *
+ *	PURPOSE:
+ *	Writes a value from the shared data file to the data buffer. Sets eof to
+ *	EOF if it hits the end of the file. Gives preference to readers - if there
+ *	are any readers reading from the data buffer, writer will wait for them
+ *	to finish. Only one writer can write at a time. Once a writer reaches the 
+ *	end of the shared data file, all writers terminate and print the number of 
+ *	entries they have written to sim_out.
+ *  ============================================================================
+ */
 void* writer( void* voidIn )
 {
 	int pid, value, count;
@@ -139,10 +168,13 @@ void* writer( void* voidIn )
 	in = (WriterInput*)voidIn;
 	count = 0;
 
+	/* Continues to loop until the end of the input file is reached */
 	while ( eof != EOF )
 	{
-		/* Waits for writer critical section to be free */
+		/* Waits for mutex to be free */
 		pthread_mutex_lock( &mutex );
+		
+		/* If a reader is currently reading, wait for all readers to finish */
 		if ( reading >= 1 )
 		{
 			pthread_cond_wait( &cond, &mutex );
@@ -151,8 +183,11 @@ void* writer( void* voidIn )
 		/* If the buffer is not full, read from shared data and write to the buffer */
 		if ( !isFull( in -> buffer ) && eof != EOF )
 		{
+			/* Assigns the next unread entry in the shared data file to str */
 			eof = fscanf( in -> inFile, "%s", str );
 			
+			/* If the end of the file has not been reached, write to the data
+			 * buffer */
 			if ( eof != EOF )
 			{
 				value = atoi( str );
@@ -162,19 +197,47 @@ void* writer( void* voidIn )
 			}
 		}
 
+		/* Signal writers waiting for readers, since multiple readers may be waiting
+		 * simultaneously, but readers only send one signal when all are finished */
 		pthread_cond_signal( &cond );
+
+		/* Unlock mutex */
 		pthread_mutex_unlock( &mutex );
 		
+		/* Sleep for predefined time span */
 		sleep( in -> waitTime );
 	}
 	
 	/* Prints number of buffer writes to sim_out */
-	sprintf( message, "Writer %d has finished writing %d pieces of data to the data_buffer\n", pid, count );
+	sprintf( message, "Writer %d has finished writing %d pieces of data to the data_buffer\n", 
+		pid, count );
 	printToSimOut( in -> outFile, message );
 
+	/* Terminate the thread */
 	pthread_exit( 0 );
 }
 
+/*	============================================================================
+ *	FUNCTION: reader
+ *	IMPORTS:  voidIn, a void pointer pointing to a ReaderInput struct. This
+ *	struct has 3 fields:
+ *            outFile:  pointer to the output file
+ *            waitTime: integer indicating sleep time in seconds
+ *            buffer:   pointer to the data buffer, represented by a DataBuffer
+ *            			struct.
+ *
+ *	PURPOSE:
+ *  Reads from the data buffer. Increments the tracker corresponding to the
+ *  read cell so that writers can tell if it is safe to overwrite a cell. The
+ *  reading section is braced by a pair of critical sections - this means that
+ *  multiple readers can be reading from the buffer simultaneously, but only
+ *  a single reader can be altering relevant values at once. Signals waiting
+ *  writers at the end of a loop if there are no other readers currently
+ *  reading. Upon reading every entry in the shared data file, the writer exits,
+ *  printing its total number of reads and the sum of all read values to
+ *  sim_out.
+ *	============================================================================
+ */
 void* reader( void* voidIn )
 {
 	int value, pid, count, index, success, total;
@@ -187,6 +250,8 @@ void* reader( void* voidIn )
 	index = 0;
 	total = 0;
 
+	/* Loops until every value from the input file has been read from the
+	 * shared data buffer */
 	while ( eof != EOF || count != sdLength )
 	{
 		if ( count != sdLength )
@@ -207,7 +272,6 @@ void* reader( void* voidIn )
 				!= readers )
 			{
 				value = in -> buffer -> array[index];
-				/*printf( "Reader %d read %d, count %d, sdlen %d\n", pid, value, count + 1, sdLength );*/
 				total += value;
 				count++;
 				index++;
@@ -252,6 +316,16 @@ void* reader( void* voidIn )
 	pthread_exit( 0 );
 }
 
+/*	============================================================================
+ *	FUNCTION: printToSimOut
+ *	IMPORTS:  file:    a file pointer to the file to be written to.
+ *            message: a string to be written to the file.
+ *
+ *	PURPOSE:
+ *	Prints a message to a file. Before writing to the file, acquires a mutex
+ *	lock. Releases the mutex after writing.
+ *	============================================================================
+ */
 void printToSimOut( FILE* file, char message[100] )
 {
 	pthread_mutex_lock( &outMutex );

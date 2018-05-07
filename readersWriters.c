@@ -197,10 +197,6 @@ void* writer( void* voidIn )
 			}
 		}
 
-		/* Signal writers waiting for readers, since multiple readers may be waiting
-		 * simultaneously, but readers only send one signal when all are finished */
-		pthread_cond_signal( &cond );
-
 		/* Unlock mutex */
 		pthread_mutex_unlock( &mutex );
 		
@@ -299,7 +295,7 @@ void* reader( void* voidIn )
 			reading--;
 			if ( reading == 0 )
 			{
-				pthread_cond_signal( &cond );
+				pthread_cond_broadcast( &cond );
 			}
 
 			/* Free reader critical section */

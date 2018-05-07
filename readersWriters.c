@@ -139,24 +139,24 @@ int main( int argc, char* argv[] )
 	return 0;
 }
 
-/*	============================================================================
- *	FUNCTION: writer
- *	IMPORTS:  voidIn, a void pointer pointing to a WriterInput struct. This
- *	struct has 4 fields:
- *            inFile:   pointer to the input file
- *            outFile:  pointer to the output file
- *            waitTime: integer indicating sleep time in seconds
- *            buffer:   pointer to the data buffer, represented by a DataBuffer
- *            			struct.
+/* ============================================================================
+ * FUNCTION: writer
+ * IMPORTS:  voidIn, a void pointer pointing to a WriterInput struct. This
+ * struct has 4 fields:
+ *           inFile:   pointer to the input file
+ *           outFile:  pointer to the output file
+ *           waitTime: integer indicating sleep time in seconds
+ *           buffer:   pointer to the data buffer, represented by a DataBuffer
+ *                     struct.
  *
- *	PURPOSE:
- *	Writes a value from the shared data file to the data buffer. Sets eof to
- *	EOF if it hits the end of the file. Gives preference to readers - if there
- *	are any readers reading from the data buffer, writer will wait for them
- *	to finish. Only one writer can write at a time. Once a writer reaches the 
- *	end of the shared data file, all writers terminate and print the number of 
- *	entries they have written to sim_out.
- *  ============================================================================
+ * PURPOSE:
+ * Writes a value from the shared data file to the data buffer. Sets eof to
+ * EOF if it hits the end of the file. Gives preference to readers - if there
+ * are any readers reading from the data buffer, writer will wait for them
+ * to finish. Only one writer can write at a time. Once a writer reaches the 
+ * end of the shared data file, all writers terminate and print the number of 
+ * entries they have written to sim_out.
+ * ============================================================================
  */
 void* writer( void* voidIn )
 {
@@ -217,26 +217,26 @@ void* writer( void* voidIn )
 	pthread_exit( 0 );
 }
 
-/*	============================================================================
- *	FUNCTION: reader
- *	IMPORTS:  voidIn, a void pointer pointing to a ReaderInput struct. This
- *	struct has 3 fields:
- *            outFile:  pointer to the output file
- *            waitTime: integer indicating sleep time in seconds
- *            buffer:   pointer to the data buffer, represented by a DataBuffer
+/* ============================================================================
+ * FUNCTION: reader
+ * IMPORTS:  voidIn, a void pointer pointing to a ReaderInput struct. This
+ * struct has 3 fields:
+ *           outFile:  pointer to the output file
+ *           waitTime: integer indicating sleep time in seconds
+ *           buffer:   pointer to the data buffer, represented by a DataBuffer
  *            			struct.
  *
- *	PURPOSE:
- *  Reads from the data buffer. Increments the tracker corresponding to the
- *  read cell so that writers can tell if it is safe to overwrite a cell. The
- *  reading section is braced by a pair of critical sections - this means that
- *  multiple readers can be reading from the buffer simultaneously, but only
- *  a single reader can be altering relevant values at once. Signals waiting
- *  writers at the end of a loop if there are no other readers currently
- *  reading. Upon reading every entry in the shared data file, the writer exits,
- *  printing its total number of reads and the sum of all read values to
- *  sim_out.
- *	============================================================================
+ * PURPOSE:
+ * Reads from the data buffer. Increments the tracker corresponding to the
+ * read cell so that writers can tell if it is safe to overwrite a cell. The
+ * reading section is braced by a pair of critical sections - this means that
+ * multiple readers can be reading from the buffer simultaneously, but only
+ * a single reader can be altering relevant values at once. Signals waiting
+ * writers at the end of a loop if there are no other readers currently
+ * reading. Upon reading every entry in the shared data file, the writer exits,
+ * printing its total number of reads and the sum of all read values to
+ * sim_out.
+ * ============================================================================
  */
 void* reader( void* voidIn )
 {
@@ -316,15 +316,15 @@ void* reader( void* voidIn )
 	pthread_exit( 0 );
 }
 
-/*	============================================================================
- *	FUNCTION: printToSimOut
- *	IMPORTS:  file:    a file pointer to the file to be written to.
- *            message: a string to be written to the file.
+/* ============================================================================
+ * FUNCTION: printToSimOut
+ * IMPORTS:  file:    a file pointer to the file to be written to.
+ *           message: a string to be written to the file.
  *
- *	PURPOSE:
- *	Prints a message to a file. Before writing to the file, acquires a mutex
- *	lock. Releases the mutex after writing.
- *	============================================================================
+ * PURPOSE:
+ * Prints a message to a file. Before writing to the file, acquires a mutex
+ * lock. Releases the mutex after writing.
+ * ============================================================================
  */
 void printToSimOut( FILE* file, char message[100] )
 {

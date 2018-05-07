@@ -11,14 +11,14 @@
 
 #include "fileIO.h"
 
-/*	============================================================================
- *	FUNCTION: writer
- *	IMPORTS:  filename: The name of the file to be opened
- *  EXPORTS:  A pointer to the opened file, or NULL in the event of failure
+/* ============================================================================
+ * FUNCTION: writer
+ * IMPORTS:  filename: The name of the file to be opened
+ * EXPORTS:  A pointer to the opened file, or NULL in the event of failure
  *
- *	PURPOSE:
- *  Opens a file in read-only mode, then returns a pointer to the file.
- *  ============================================================================
+ * PURPOSE:
+ * Opens a file in read-only mode, then returns a pointer to the file.
+ * ============================================================================
  */
 FILE* openFile( char* filename )
 {
